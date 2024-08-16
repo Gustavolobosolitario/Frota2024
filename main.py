@@ -15,6 +15,14 @@ import string
 import warnings
 import streamlit as st
 
+
+
+
+# Use um caminho relativo para o banco de dados
+db_path = os.path.join(os.getcwd(), 'reservas.db')
+
+
+
 # Configuração dos parâmetros do Streamlit
 st.set_option('client.showErrorDetails', False)
 
@@ -113,6 +121,13 @@ def resetar_senha():
     else:
         st.error("Token inválido ou expirado.")
 
+
+def verificar_tokens():
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM tokens')
+        tokens = cursor.fetchall()
+        st.write(tokens)
 
 
 
