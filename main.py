@@ -7,27 +7,19 @@ import smtplib
 import os
 import base64
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import random
 import string
 import warnings
-import streamlit as st
 
 
+# Conectar ao banco de dados SQLite
+conn = sqlite3.connect('reservas.db')
+cursor = conn.cursor()
 
-
-# Use um caminho relativo para o banco de dados
-db_path = os.path.join(os.getcwd(), 'reservas.db')
-
-
-
-# Configuração dos parâmetros do Streamlit
-st.set_option('client.showErrorDetails', False)
-
-
-
+print("st_aggrid importado com sucesso!")
 
 
 # Suprime especificamente a mensagem de aviso do Streamlit
@@ -66,8 +58,12 @@ if 'nome_completo' not in st.session_state:
 def recuperar_senha(email):
     token = gerar_token_tamanho_aleatorio()
     salvar_token_no_banco(email, token)
-    link = f'http://localhost:8502/?token={token}'
+    link = f'https://frota1.streamlit.app/?token={token}'  # Substitua pelo domínio do seu app
     enviar_email_recovery(email, link)
+    
+    
+
+
     
     
     
@@ -75,13 +71,14 @@ def resetar_senha():
     st.title('Redefinir Senha')
     
     # Capture os parâmetros da URL usando st.query_params
-    query_params = st.query_params
+    params = st.experimental_get_query_params
+
     
     # Exiba todos os parâmetros para depuração
-    st.write(f'Todos os parâmetros da URL: {query_params}')
+    st.write(f'Todos os parâmetros da URL: {st.experimental_get_query_params}')
     
     # Captura o token corretamente da lista
-    token = query_params.get('token', [None])[0]
+    token = st.experimental_get_query_params('token', [None])[0]
     
     # Remova espaços em branco e verifique o token
     token = token.strip() if token else None
@@ -121,13 +118,6 @@ def resetar_senha():
     else:
         st.error("Token inválido ou expirado.")
 
-
-def verificar_tokens():
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM tokens')
-        tokens = cursor.fetchall()
-        st.write(tokens)
 
 
 
@@ -174,13 +164,13 @@ def resetar_senha():
     st.title('Redefinir Senha')
     
     # Continue usando st.experimental_get_query_params
-    query_params = st.experimental_get_query_params()
+    query_params = st.experimental_get_query_params
     
     # Exiba todos os parâmetros para depuração
-    st.write(f'Todos os parâmetros da URL: {query_params}')
+    st.write(f'Todos os parâmetros da URL: {st.query_params}')
     
     # Captura o token corretamente da lista
-    token = query_params.get('token', [None])[0]
+    token = st.experimental_get_query_params.get('token', [None])[0]
     
     # Remova espaços em branco e verifique o token
     token = token.strip() if token else None
@@ -231,7 +221,7 @@ def resetar_senha():
 def recuperar_senha(email):
     token = gerar_token_tamanho_aleatorio()
     salvar_token_no_banco(email, token)
-    link = f'http://localhost:8501/?token={token}'
+    link = f'https://frota1.streamlit.app/?token={token}'  # Substitua pelo domínio do seu app
     enviar_email_recovery(email, link)
 
 
@@ -379,8 +369,8 @@ def criar_tabelas():
                             nome_completo TEXT,
                             email_usuario TEXT,
                             dtRetirada DATE,
-                            dtDevolucao DATE,
                             hrRetirada TEXT,
+                            dtDevolucao DATE,
                             hrDevolucao TEXT,
                             carro TEXT,
                             cidade TEXT,
@@ -457,6 +447,7 @@ def login():
         if verificar_usuario(email, senha):
             st.success('Login bem-sucedido!')
             st.session_state.pagina = 'home'
+            
         else:
             st.error('E-mail ou senha incorretos.')
 
@@ -484,6 +475,19 @@ def cadastro():
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+# Função para adicionar um novo usuário
+def adicionar_usuario(nome_completo, email, senha):
+    senha_hash = hashlib.sha256(senha.encode()).hexdigest()
+    try:
+        with sqlite3.connect('reservas.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO usuarios (nome_completo, email, senha) VALUES (?, ?, ?)', 
+                           (nome_completo, email, senha_hash))
+            conn.commit()
+            return True  # Retorna True se o cadastro for bem-sucedido
+    except Exception as e:
+        print(f'Erro ao adicionar usuário: {e}')
+        return False  # Retorna False em caso de erro
 
 
 
@@ -498,28 +502,33 @@ def arredondar_para_intervalo(time_obj, intervalo_mins=30):
     minutos = arredondado % 60
     return time(horas, minutos)
 
+
+
 # Função para adicionar uma nova reserva
 def adicionar_reserva(dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro, destinos):
     try:
+        st.write("Preparando para salvar a reserva...")
         destino_str = ', '.join(destinos) if destinos else ''
-        if veiculo_disponivel(dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro):
-            with sqlite3.connect('reservas.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('''INSERT INTO reservas 
-                                  (nome_completo, email_usuario, dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro, cidade, status) 
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                               (st.session_state.nome_completo, st.session_state.usuario_logado, 
-                                dtRetirada.strftime('%d/%m/%Y'), hrRetirada.strftime('%H:%M:%S'), 
-                                dtDevolucao.strftime('%d/%m/%Y'), hrDevolucao.strftime('%H:%M:%S'), 
-                                carro, destino_str, 'Agendado'))
-                conn.commit()
-            enviar_notificacao_reserva(st.session_state.nome_completo, dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro, destino_str)
-            return True
-        else:
-            return False
+        with sqlite3.connect('reservas.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('''INSERT INTO reservas 
+                              (nome_completo, email_usuario, dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro, cidade, status) 
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                           (st.session_state.nome_completo, st.session_state.usuario_logado, 
+                            dtRetirada.strftime('%d/%m/%Y'), hrRetirada.strftime('%H:%M:%S'), 
+                            dtDevolucao.strftime('%d/%m/%Y'), hrDevolucao.strftime('%H:%M:%S'), 
+                            carro, destino_str, 'Agendado'))
+            conn.commit()
+        st.success("Reserva realizada com sucesso!")
+        st.write("Reserva salva no banco de dados.")
     except sqlite3.Error as e:
-        print(f"Erro ao adicionar reserva: {e}")
-        return False
+        st.error(f"Erro ao adicionar reserva: {e}")
+    except Exception as e:
+        st.error(f"Erro inesperado: {e}")
+
+
+
+
 
 
 
@@ -675,33 +684,33 @@ def atualizar_status_reserva(selected_id):
 
 
 
+
+
 # Função para adicionar uma nova reserva
 def adicionar_reserva(dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro, destinos):
     try:
-        if not veiculo_disponivel(dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro):
-            st.error("O veículo já está reservado para o período selecionado.")
-            return
-        
         destino_str = ', '.join(destinos) if destinos else ''
-        with sqlite3.connect('reservas.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute('''INSERT INTO reservas 
-                              (nome_completo, email_usuario, dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro, cidade, status) 
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                           (st.session_state.nome_completo, st.session_state.usuario_logado, 
-                            dtRetirada.strftime('%d/%m/%Y'), hrRetirada.strftime('%H:%M:%S'), 
-                            dtDevolucao.strftime('%d/%m/%Y'), hrDevolucao.strftime('%H:%M:%S'), 
-                            carro, destino_str, 'Agendado'))
-            conn.commit()  # Confirma a transação no banco de dados
-            st.success("Reserva realizada com sucesso!")  # Mensagem de sucesso exibida após a confirmação
-            
-            # Enviar a notificação apenas se a reserva for concluída com sucesso
+        if veiculo_disponivel(dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro):
+            with sqlite3.connect('reservas.db') as conn:
+                cursor = conn.cursor()
+                cursor.execute('''INSERT INTO reservas 
+                                  (nome_completo, email_usuario, dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro, cidade, status) 
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                               (st.session_state.nome_completo, st.session_state.usuario_logado, 
+                                dtRetirada.strftime('%d/%m/%Y'), hrRetirada.strftime('%H:%M:%S'), 
+                                dtDevolucao.strftime('%d/%m/%Y'), hrDevolucao.strftime('%H:%M:%S'), 
+                                carro, destino_str, 'Agendado'))
+                conn.commit()
             enviar_notificacao_reserva(st.session_state.nome_completo, dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, carro, destino_str)
-            
+            st.success("Reserva realizada com sucesso!")
+        else:
+            st.error("O veículo já está reservado para o período selecionado.")
     except sqlite3.Error as e:
         st.error(f"Erro ao adicionar reserva: {e}")
     except Exception as e:
         st.error(f"Erro inesperado: {e}")
+
+
 
 
 
@@ -796,17 +805,18 @@ def verificar_tabelas():
     
 
 
-# Função para limpar o banco de dados
 def limpar_banco_dados():
     try:
         with sqlite3.connect('reservas.db') as conn:
             cursor = conn.cursor()
             cursor.execute("DROP TABLE IF EXISTS reservas;")
             cursor.execute("DROP TABLE IF EXISTS usuarios;")
+            cursor.execute("DROP TABLE IF EXISTS tokens;")  # Adicionado para apagar a tabela de tokens
             conn.commit()
             criar_tabelas()
     except sqlite3.OperationalError as e:
         st.error(f"Erro ao acessar o banco de dados: {e}")
+
         
         
         
@@ -814,7 +824,7 @@ def limpar_banco_dados():
 def recuperar_senha(email):
     token = gerar_token_tamanho_aleatorio()
     salvar_token_no_banco(email, token)
-    link = f'http://localhost:8501/?token={token}'
+    link = f'https://frota1.streamlit.app/?token={token}'  # Substitua pelo domínio do seu app
     enviar_email_recovery(email, link)
 
 
@@ -844,8 +854,8 @@ def atualizar_senha_com_token(token, nova_senha):
 # Página para redefinir a senha
 def resetar_senha():
     st.title('Redefinir Senha')
-    query_params = st.experimental_get_query_params()
-    token = query_params.get('token', [None])[0]
+    query_params = st.experimental_get_query_params
+    token = query_params = st.experimental_get_query_params().get('token', [None])[0]
     
     
 
@@ -879,6 +889,8 @@ def resetar_senha():
 
 
 
+
+
 def home_page():
     criar_tabelas()
     
@@ -889,19 +901,43 @@ def home_page():
         if st.sidebar.button('Limpar Banco de Dados'):
             limpar_banco_dados()
             st.session_state.clear()
-            st.experimental_set_query_params(pagina='home')
+            st.experimental_get_query_params(pagina='home')
 
         with st.container(border=True):
             st.title('Reserva')
             col1, col2 = st.columns(2)
 
+            # Variáveis de controle para confirmação de datas de final de semana
+            if 'retirada_confirmada' not in st.session_state:
+                st.session_state.retirada_confirmada = False
+            if 'devolucao_confirmada' not in st.session_state:
+                st.session_state.devolucao_confirmada = False
+
             with col1:
                 dtRetirada = st.date_input(label='Data de Retirada', key='dtRetirada', value=datetime.now(), format='DD/MM/YYYY')
                 hrRetirada = st.time_input(label='Hora de Retirada', key='hrRetirada', value=time(9, 0))
 
+                # Verificar se a data de retirada é no final de semana
+                if dtRetirada.weekday() >= 5 and not st.session_state.retirada_confirmada:
+                    st.warning("A data de retirada é um final de semana. Deseja continuar?")
+                    if st.button("Confirmar Retirada", key="confirmar_retirada"):
+                        st.session_state.retirada_confirmada = True  # Usuário confirmou a data
+                elif dtRetirada.weekday() < 5:
+                    # Se for durante a semana, a data é automaticamente confirmada
+                    st.session_state.retirada_confirmada = True
+
             with col2:
                 dtDevolucao = st.date_input(label='Data de Devolução', key='dtDevolucao', value=datetime.now(), format='DD/MM/YYYY')
                 hrDevolucao = st.time_input(label='Hora de Devolução', key='hrDevolucao', value=time(9, 0))
+
+                # Verificar se a data de devolução é no final de semana
+                if dtDevolucao.weekday() >= 5 and not st.session_state.devolucao_confirmada:
+                    st.warning("A data de devolução é um final de semana. Deseja continuar?")
+                    if st.button("Confirmar Devolução", key="confirmar_devolucao"):
+                        st.session_state.devolucao_confirmada = True  # Usuário confirmou a data
+                elif dtDevolucao.weekday() < 5:
+                    # Se for durante a semana, a data é automaticamente confirmada
+                    st.session_state.devolucao_confirmada = True
 
             nome_completo = st.session_state.nome_completo
             email_usuario = st.session_state.usuario_logado
@@ -909,25 +945,108 @@ def home_page():
                 'SWQ1F92 - Versa Advance', 'SVO6A16 - Saveiro', 'GEZ5262 - Nissan SV'
             ])
             descDestino = st.multiselect(label='Cidade', key='destino', options=[
-                'Rio Claro', 'Lençóis Paulista', 'São Carlos', 'Araras', 'Ribeirão Preto',
-                'Jaboticabal', 'Araraquara', 'Leme', 'Piracicaba', 'São Paulo',
-                'Campinas', 'Ibate', 'Porto Ferreira'
+                 "Adamantina", "Adolfo", "Aguaí", "Águas da Prata", "Águas de Lindóia", "Águas de Santa Bárbara", "Águas de São Pedro",
+    "Agudos", "Alambari", "Alfredo Marcondes", "Altair", "Altinópolis", "Alto Alegre", "Alumínio", "Álvares Florence",
+    "Álvares Machado", "Álvaro de Carvalho", "Alvinlândia", "Americana", "Américo Brasiliense", "Américo de Campos",
+    "Amparo", "Analândia", "Andradina", "Angatuba", "Anhembi", "Anhumas", "Aparecida", "Aparecida d'Oeste", "Apiaí",
+    "Araçariguama", "Araçatuba", "Araçoiaba da Serra", "Aramina", "Arandu", "Arapeí", "Araraquara", "Araras",
+    "Arco-Íris", "Arealva", "Areias", "Areiópolis", "Ariranha", "Artur Nogueira", "Arujá", "Aspásia", "Assis",
+    "Atibaia", "Auriflama", "Avaí", "Avanhandava", "Avaré", "Bady Bassitt", "Balbinos", "Bálsamo", "Bananal",
+    "Barão de Antonina", "Barbosa", "Bariri", "Barra Bonita", "Barra do Chapéu", "Barra do Turvo", "Barretos", "Barrinha",
+    "Barueri", "Bastos", "Batatais", "Bauru", "Bebedouro", "Bento de Abreu", "Bernardino de Campos", "Bertioga",
+    "Bilac", "Birigui", "Biritiba-Mirim", "Boa Esperança do Sul", "Bocaina", "Bofete", "Boituva", "Bom Jesus dos Perdões",
+    "Bom Sucesso de Itararé", "Borá", "Boracéia", "Borborema", "Borebi", "Botucatu", "Bragança Paulista", "Braúna",
+    "Brejo Alegre", "Brodowski", "Brotas", "Buri", "Buritama", "Buritizal", "Cabrália Paulista", "Cabreúva", "Caçapava",
+    "Cachoeira Paulista", "Caconde", "Cafelândia", "Caiabu", "Caieiras", "Caiuá", "Cajamar", "Cajati", "Cajobi",
+    "Cajuru", "Campina do Monte Alegre", "Campinas", "Campo Limpo Paulista", "Campos do Jordão", "Campos Novos Paulista",
+    "Cananéia", "Canas", "Cândido Mota", "Cândido Rodrigues", "Canitar", "Capão Bonito", "Capela do Alto", "Capivari",
+    "Caraguatatuba", "Carapicuíba", "Cardoso", "Casa Branca", "Cássia dos Coqueiros", "Castilho", "Catanduva", "Catiguá",
+    "Cedral", "Cerqueira César", "Cerquilho", "Cesário Lange", "Charqueada", "Chavantes", "Clementina", "Colina",
+    "Colômbia", "Conchal", "Conchas", "Cordeirópolis", "Coroados", "Coronel Macedo", "Corumbataí", "Cosmópolis",
+    "Cosmorama", "Cotia", "Cravinhos", "Cristais Paulista", "Cruzália", "Cruzeiro", "Cubatão", "Cunha", "Descalvado",
+    "Diadema", "Dirce Reis", "Divinolândia", "Dobrada", "Dois Córregos", "Dolcinópolis", "Dourado", "Dracena", "Duartina",
+    "Dumont", "Echaporã", "Eldorado", "Elias Fausto", "Elisiário", "Embaúba", "Embu das Artes", "Embu-Guaçu", "Emilianópolis",
+    "Engenheiro Coelho", "Espírito Santo do Pinhal", "Espírito Santo do Turvo", "Estiva Gerbi", "Estrela d'Oeste", "Estrela do Norte",
+    "Euclides da Cunha Paulista", "Fartura", "Fernando Prestes", "Fernandópolis", "Fernão", "Ferraz de Vasconcelos",
+    "Flora Rica", "Floreal", "Flórida Paulista", "Florínia", "Franca", "Francisco Morato", "Franco da Rocha", "Gabriel Monteiro",
+    "Gália", "Garça", "Gastão Vidigal", "Gavião Peixoto", "General Salgado", "Getulina", "Glicério", "Guaiçara", "Guaimbê",
+    "Guaíra", "Guapiaçu", "Guapiara", "Guará", "Guaraçaí", "Guaraci", "Guarani d'Oeste", "Guarantã", "Guararapes",
+    "Guararema", "Guaratinguetá", "Guareí", "Guariba", "Guarujá", "Guarulhos", "Guatapará", "Guzolândia", "Herculândia",
+    "Holambra", "Hortolândia", "Iacanga", "Iacri", "Iaras", "Ibaté", "Ibirá", "Ibirarema", "Ibitinga", "Ibiúna", "Icém",
+    "Iepê", "Igaraçu do Tietê", "Igarapava", "Igaratá", "Iguape", "Ilha Comprida", "Ilha Solteira", "Ilhabela", "Indaiatuba",
+    "Indiana", "Indiaporã", "Inúbia Paulista", "Ipaussu", "Iperó", "Ipeúna", "Ipiguá", "Iporanga", "Ipuã", "Iracemápolis",
+    "Irapuã", "Irapuru", "Itaberá", "Itaí", "Itajobi", "Itaju", "Itanhaém", "Itaóca", "Itapecerica da Serra", "Itapetininga",
+    "Itapeva", "Itapevi", "Itapira", "Itapirapuã Paulista", "Itápolis", "Itaporanga", "Itapuí", "Itapura", "Itaquaquecetuba",
+    "Itararé", "Itariri", "Itatiba", "Itatinga", "Itirapina", "Itirapuã", "Itobi", "Itu", "Itupeva", "Ituverava", "Jaborandi",
+    "Jaboticabal", "Jacareí", "Jaci", "Jacupiranga", "Jaguariúna", "Jales", "Jambeiro", "Jandira", "Jardinópolis", "Jarinu",
+    "Jaú", "Jeriquara", "Joanópolis", "João Ramalho", "José Bonifácio", "Júlio Mesquita", "Jumirim", "Jundiaí", "Junqueirópolis",
+    "Juquiá", "Juquitiba", "Lagoinha", "Laranjal Paulista", "Lavínia", "Lavrinhas", "Leme", "Lençóis Paulista", "Limeira",
+    "Lindóia", "Lins", "Lorena", "Lourdes", "Louveira", "Lucélia", "Lucianópolis", "Luís Antônio", "Luiziânia", "Lupércio",
+    "Lutécia", "Macatuba", "Macaubal", "Macedônia", "Magda", "Mairinque", "Mairiporã", "Manduri", "Marabá Paulista",
+    "Maracaí", "Marapoama", "Mariápolis", "Marília", "Marinópolis", "Martinópolis", "Matão", "Mauá", "Mendonça",
+    "Meridiano", "Mesópolis", "Miguelópolis", "Mineiros do Tietê", "Mira Estrela", "Miracatu", "Mirandópolis", "Mirante do Paranapanema",
+    "Mirassol", "Mirassolândia", "Mococa", "Mogi das Cruzes", "Mogi Guaçu", "Moji Mirim", "Mombuca", "Monções", "Mongaguá",
+    "Monte Alegre do Sul", "Monte Alto", "Monte Aprazível", "Monte Azul Paulista", "Monte Castelo", "Monte Mor", "Monteiro Lobato",
+    "Morro Agudo", "Morungaba", "Motuca", "Murutinga do Sul", "Nantes", "Narandiba", "Natividade da Serra", "Nazaré Paulista",
+    "Neves Paulista", "Nhandeara", "Nipoã", "Nova Aliança", "Nova Campina", "Nova Canaã Paulista", "Nova Castilho",
+    "Nova Europa", "Nova Granada", "Nova Guataporanga", "Nova Independência", "Nova Luzitânia", "Nova Odessa", "Novais",
+    "Novo Horizonte", "Nuporanga", "Ocauçu", "Óleo", "Olímpia", "Onda Verde", "Oriente", "Orindiúva", "Orlândia", "Osasco",
+    "Oscar Bressane", "Osvaldo Cruz", "Ourinhos", "Ouro Verde", "Ouroeste", "Pacaembu", "Palestina", "Palmares Paulista",
+    "Palmeira d'Oeste", "Palmital", "Panorama", "Paraguaçu Paulista", "Paraibuna", "Paraíso", "Paranapanema", "Paranapuã",
+    "Parapuã", "Pardinho", "Pariquera-Açu", "Parisi", "Patrocínio Paulista", "Paulicéia", "Paulínia", "Paulistânia", "Paulo de Faria",
+    "Pederneiras", "Pedra Bela", "Pedranópolis", "Pedregulho", "Pedreira", "Pedrinhas Paulista", "Pedro de Toledo", "Penápolis",
+    "Pereira Barreto", "Pereiras", "Peruíbe", "Piacatu", "Piedade", "Pilar do Sul", "Pindamonhangaba", "Pindorama", "Pinhalzinho",
+    "Piquerobi", "Piquete", "Piracaia", "Piracicaba", "Piraju", "Pirajuí", "Pirangi", "Pirapora do Bom Jesus", "Pirapozinho",
+    "Pirassununga", "Piratininga", "Pitangueiras", "Planalto", "Platina", "Poá", "Poloni", "Pompéia", "Pongaí", "Pontal",
+    "Pontalinda", "Pontes Gestal", "Populina", "Porangaba", "Porto Feliz", "Porto Ferreira", "Potim", "Potirendaba", "Pracinha",
+    "Pradópolis", "Praia Grande", "Pratânia", "Presidente Alves", "Presidente Bernardes", "Presidente Epitácio", "Presidente Prudente",
+    "Presidente Venceslau", "Promissão", "Quadra", "Quatá", "Queiroz", "Queluz", "Quintana", "Rafard", "Rancharia", "Redenção da Serra",
+    "Regente Feijó", "Reginópolis", "Registro", "Restinga", "Ribeira", "Ribeirão Bonito", "Ribeirão Branco", "Ribeirão Corrente",
+    "Ribeirão do Sul", "Ribeirão dos Índios", "Ribeirão Grande", "Ribeirão Pires", "Ribeirão Preto", "Rifaina", "Rincão", "Rinópolis",
+    "Rio Claro", "Rio das Pedras", "Rio Grande da Serra", "Riolândia", "Riversul", "Rosana", "Roseira", "Rubiácea", "Rubinéia",
+    "Sabino", "Sagres", "Sales", "Sales Oliveira", "Salesópolis", "Salmourão", "Saltinho", "Salto", "Salto de Pirapora",
+    "Salto Grande", "Sandovalina", "Santa Adélia", "Santa Albertina", "Santa Bárbara d'Oeste", "Santa Branca", "Santa Clara d'Oeste",
+    "Santa Cruz da Conceição", "Santa Cruz da Esperança", "Santa Cruz das Palmeiras", "Santa Cruz do Rio Pardo", "Santa Ernestina",
+    "Santa Fé do Sul", "Santa Gertrudes", "Santa Isabel", "Santa Lúcia", "Santa Maria da Serra", "Santa Mercedes", "Santa Rita d'Oeste",
+    "Santa Rita do Passa Quatro", "Santa Rosa de Viterbo", "Santa Salete", "Santana da Ponte Pensa", "Santana de Parnaíba",
+    "Santo Anastácio", "Santo André", "Santo Antônio da Alegria", "Santo Antônio de Posse", "Santo Antônio do Aracanguá", "Santo Antônio do Jardim",
+    "Santo Antônio do Pinhal", "Santo Expedito", "Santópolis do Aguapeí", "Santos", "São Bento do Sapucaí", "São Bernardo do Campo",
+    "São Caetano do Sul", "São Carlos", "São Francisco", "São João da Boa Vista", "São João das Duas Pontes", "São João de Iracema",
+    "São João do Pau d'Alho", "São Joaquim da Barra", "São José da Bela Vista", "São José do Barreiro", "São José do Rio Pardo",
+    "São José do Rio Preto", "São José dos Campos", "São Lourenço da Serra", "São Luiz do Paraitinga", "São Manuel", "São Miguel Arcanjo",
+    "São Paulo", "São Pedro", "São Pedro do Turvo", "São Roque", "São Sebastião", "São Sebastião da Grama", "São Simão", "São Vicente",
+    "Sarapuí", "Sarutaiá", "Sebastianópolis do Sul", "Serra Azul", "Serra Negra", "Serrana", "Sertãozinho", "Sete Barras",
+    "Severínia", "Silveiras", "Socorro", "Sorocaba", "Sud Mennucci", "Sumaré", "Suzanápolis", "Suzano", "Tabapuã", "Tabatinga",
+    "Taboão da Serra", "Taciba", "Taguaí", "Taiaçu", "Taiúva", "Tambaú", "Tanabi", "Tapiraí", "Tapiratiba", "Taquaral", "Taquaritinga",
+    "Taquarituba", "Taquarivaí", "Tarabai", "Tarumã", "Tatuí", "Taubaté", "Tejupá", "Teodoro Sampaio", "Terra Roxa", "Tietê",
+    "Timburi", "Torre de Pedra", "Torrinha", "Trabiju", "Tremembé", "Três Fronteiras", "Tuiuti", "Tupã", "Tupi Paulista",
+    "Turiúba", "Turmalina", "Ubarana", "Ubatuba", "Ubirajara", "Uchoa", "União Paulista", "Urânia", "Uru", "Urupês", "Valentim Gentil",
+    "Valinhos", "Valparaíso", "Vargem", "Vargem Grande do Sul", "Vargem Grande Paulista", "Várzea Paulista", "Vera Cruz", "Vinhedo",
+    "Viradouro", "Vista Alegre do Alto", "Vitória Brasil", "Votorantim", "Votuporanga", "Zacarias"
             ])
-            
+
             hoje = datetime.now().date()
+
+            # Se tudo for confirmado, pode cadastrar a reserva
             if not (dtRetirada and hrRetirada and dtDevolucao and hrDevolucao and descVeiculo and descDestino):
                 btnCadastrar = st.button('Cadastrar', key='botao_cadastrar', disabled=True)
             else:
                 btnCadastrar = st.button('Cadastrar', key='botao_cadastrar', disabled=False)
                 if btnCadastrar:
-                    if dtRetirada < hoje or dtDevolucao < hoje:
+                    # Verificar se as datas foram confirmadas, ou se não são finais de semana
+                    if (dtRetirada.weekday() >= 5 and not st.session_state.retirada_confirmada) or (dtDevolucao.weekday() >= 5 and not st.session_state.devolucao_confirmada):
+                        st.error('Por favor, confirme as datas selecionadas.')
+                    elif dtRetirada < hoje or dtDevolucao < hoje:
                         st.error('Não é possível fazer uma reserva para uma data passada.')
                     elif dtDevolucao < dtRetirada:
                         st.error('A data de devolução não pode ser anterior à data de retirada.')
                     else:
                         adicionar_reserva(dtRetirada, hrRetirada, dtDevolucao, hrDevolucao, descVeiculo, descDestino)
-                        st.success('Reserva realizada com sucesso!')
-                                     
+                        
+                        # Resetar confirmações
+                        st.session_state.retirada_confirmada = False
+                        st.session_state.devolucao_confirmada = False
+
         with st.form(key='buscar_reserva'):
             st.subheader('Consultar Reservas')
             col1, col2 = st.columns(2)
@@ -944,8 +1063,84 @@ def home_page():
                 carro = st.multiselect(label='Carro', key='carro_filtro', options=['SWQ1F92 - Versa Advance', 'SVO6A16 - Saveiro', 'GEZ5262 - Nissan SV'])
 
             with col4:
-                cidade = st.multiselect(label='Cidade', key='cidade_filtro', options=['Rio Claro', 'Lençóis Paulista', 'São Carlos', 'Araras', 'Ribeirão Preto',
-                                                                                    'Jaboticabal', 'Araraquara', 'Leme', 'Piracicaba', 'São Paulo', 'Campinas', 'Ibate', 'Porto Ferreira'])
+                cidade = st.multiselect(label='Cidade', key='cidade_filtro', options=[ "Adamantina", "Adolfo", "Aguaí", "Águas da Prata", "Águas de Lindóia", "Águas de Santa Bárbara", "Águas de São Pedro",
+    "Agudos", "Alambari", "Alfredo Marcondes", "Altair", "Altinópolis", "Alto Alegre", "Alumínio", "Álvares Florence",
+    "Álvares Machado", "Álvaro de Carvalho", "Alvinlândia", "Americana", "Américo Brasiliense", "Américo de Campos",
+    "Amparo", "Analândia", "Andradina", "Angatuba", "Anhembi", "Anhumas", "Aparecida", "Aparecida d'Oeste", "Apiaí",
+    "Araçariguama", "Araçatuba", "Araçoiaba da Serra", "Aramina", "Arandu", "Arapeí", "Araraquara", "Araras",
+    "Arco-Íris", "Arealva", "Areias", "Areiópolis", "Ariranha", "Artur Nogueira", "Arujá", "Aspásia", "Assis",
+    "Atibaia", "Auriflama", "Avaí", "Avanhandava", "Avaré", "Bady Bassitt", "Balbinos", "Bálsamo", "Bananal",
+    "Barão de Antonina", "Barbosa", "Bariri", "Barra Bonita", "Barra do Chapéu", "Barra do Turvo", "Barretos", "Barrinha",
+    "Barueri", "Bastos", "Batatais", "Bauru", "Bebedouro", "Bento de Abreu", "Bernardino de Campos", "Bertioga",
+    "Bilac", "Birigui", "Biritiba-Mirim", "Boa Esperança do Sul", "Bocaina", "Bofete", "Boituva", "Bom Jesus dos Perdões",
+    "Bom Sucesso de Itararé", "Borá", "Boracéia", "Borborema", "Borebi", "Botucatu", "Bragança Paulista", "Braúna",
+    "Brejo Alegre", "Brodowski", "Brotas", "Buri", "Buritama", "Buritizal", "Cabrália Paulista", "Cabreúva", "Caçapava",
+    "Cachoeira Paulista", "Caconde", "Cafelândia", "Caiabu", "Caieiras", "Caiuá", "Cajamar", "Cajati", "Cajobi",
+    "Cajuru", "Campina do Monte Alegre", "Campinas", "Campo Limpo Paulista", "Campos do Jordão", "Campos Novos Paulista",
+    "Cananéia", "Canas", "Cândido Mota", "Cândido Rodrigues", "Canitar", "Capão Bonito", "Capela do Alto", "Capivari",
+    "Caraguatatuba", "Carapicuíba", "Cardoso", "Casa Branca", "Cássia dos Coqueiros", "Castilho", "Catanduva", "Catiguá",
+    "Cedral", "Cerqueira César", "Cerquilho", "Cesário Lange", "Charqueada", "Chavantes", "Clementina", "Colina",
+    "Colômbia", "Conchal", "Conchas", "Cordeirópolis", "Coroados", "Coronel Macedo", "Corumbataí", "Cosmópolis",
+    "Cosmorama", "Cotia", "Cravinhos", "Cristais Paulista", "Cruzália", "Cruzeiro", "Cubatão", "Cunha", "Descalvado",
+    "Diadema", "Dirce Reis", "Divinolândia", "Dobrada", "Dois Córregos", "Dolcinópolis", "Dourado", "Dracena", "Duartina",
+    "Dumont", "Echaporã", "Eldorado", "Elias Fausto", "Elisiário", "Embaúba", "Embu das Artes", "Embu-Guaçu", "Emilianópolis",
+    "Engenheiro Coelho", "Espírito Santo do Pinhal", "Espírito Santo do Turvo", "Estiva Gerbi", "Estrela d'Oeste", "Estrela do Norte",
+    "Euclides da Cunha Paulista", "Fartura", "Fernando Prestes", "Fernandópolis", "Fernão", "Ferraz de Vasconcelos",
+    "Flora Rica", "Floreal", "Flórida Paulista", "Florínia", "Franca", "Francisco Morato", "Franco da Rocha", "Gabriel Monteiro",
+    "Gália", "Garça", "Gastão Vidigal", "Gavião Peixoto", "General Salgado", "Getulina", "Glicério", "Guaiçara", "Guaimbê",
+    "Guaíra", "Guapiaçu", "Guapiara", "Guará", "Guaraçaí", "Guaraci", "Guarani d'Oeste", "Guarantã", "Guararapes",
+    "Guararema", "Guaratinguetá", "Guareí", "Guariba", "Guarujá", "Guarulhos", "Guatapará", "Guzolândia", "Herculândia",
+    "Holambra", "Hortolândia", "Iacanga", "Iacri", "Iaras", "Ibaté", "Ibirá", "Ibirarema", "Ibitinga", "Ibiúna", "Icém",
+    "Iepê", "Igaraçu do Tietê", "Igarapava", "Igaratá", "Iguape", "Ilha Comprida", "Ilha Solteira", "Ilhabela", "Indaiatuba",
+    "Indiana", "Indiaporã", "Inúbia Paulista", "Ipaussu", "Iperó", "Ipeúna", "Ipiguá", "Iporanga", "Ipuã", "Iracemápolis",
+    "Irapuã", "Irapuru", "Itaberá", "Itaí", "Itajobi", "Itaju", "Itanhaém", "Itaóca", "Itapecerica da Serra", "Itapetininga",
+    "Itapeva", "Itapevi", "Itapira", "Itapirapuã Paulista", "Itápolis", "Itaporanga", "Itapuí", "Itapura", "Itaquaquecetuba",
+    "Itararé", "Itariri", "Itatiba", "Itatinga", "Itirapina", "Itirapuã", "Itobi", "Itu", "Itupeva", "Ituverava", "Jaborandi",
+    "Jaboticabal", "Jacareí", "Jaci", "Jacupiranga", "Jaguariúna", "Jales", "Jambeiro", "Jandira", "Jardinópolis", "Jarinu",
+    "Jaú", "Jeriquara", "Joanópolis", "João Ramalho", "José Bonifácio", "Júlio Mesquita", "Jumirim", "Jundiaí", "Junqueirópolis",
+    "Juquiá", "Juquitiba", "Lagoinha", "Laranjal Paulista", "Lavínia", "Lavrinhas", "Leme", "Lençóis Paulista", "Limeira",
+    "Lindóia", "Lins", "Lorena", "Lourdes", "Louveira", "Lucélia", "Lucianópolis", "Luís Antônio", "Luiziânia", "Lupércio",
+    "Lutécia", "Macatuba", "Macaubal", "Macedônia", "Magda", "Mairinque", "Mairiporã", "Manduri", "Marabá Paulista",
+    "Maracaí", "Marapoama", "Mariápolis", "Marília", "Marinópolis", "Martinópolis", "Matão", "Mauá", "Mendonça",
+    "Meridiano", "Mesópolis", "Miguelópolis", "Mineiros do Tietê", "Mira Estrela", "Miracatu", "Mirandópolis", "Mirante do Paranapanema",
+    "Mirassol", "Mirassolândia", "Mococa", "Mogi das Cruzes", "Mogi Guaçu", "Moji Mirim", "Mombuca", "Monções", "Mongaguá",
+    "Monte Alegre do Sul", "Monte Alto", "Monte Aprazível", "Monte Azul Paulista", "Monte Castelo", "Monte Mor", "Monteiro Lobato",
+    "Morro Agudo", "Morungaba", "Motuca", "Murutinga do Sul", "Nantes", "Narandiba", "Natividade da Serra", "Nazaré Paulista",
+    "Neves Paulista", "Nhandeara", "Nipoã", "Nova Aliança", "Nova Campina", "Nova Canaã Paulista", "Nova Castilho",
+    "Nova Europa", "Nova Granada", "Nova Guataporanga", "Nova Independência", "Nova Luzitânia", "Nova Odessa", "Novais",
+    "Novo Horizonte", "Nuporanga", "Ocauçu", "Óleo", "Olímpia", "Onda Verde", "Oriente", "Orindiúva", "Orlândia", "Osasco",
+    "Oscar Bressane", "Osvaldo Cruz", "Ourinhos", "Ouro Verde", "Ouroeste", "Pacaembu", "Palestina", "Palmares Paulista",
+    "Palmeira d'Oeste", "Palmital", "Panorama", "Paraguaçu Paulista", "Paraibuna", "Paraíso", "Paranapanema", "Paranapuã",
+    "Parapuã", "Pardinho", "Pariquera-Açu", "Parisi", "Patrocínio Paulista", "Paulicéia", "Paulínia", "Paulistânia", "Paulo de Faria",
+    "Pederneiras", "Pedra Bela", "Pedranópolis", "Pedregulho", "Pedreira", "Pedrinhas Paulista", "Pedro de Toledo", "Penápolis",
+    "Pereira Barreto", "Pereiras", "Peruíbe", "Piacatu", "Piedade", "Pilar do Sul", "Pindamonhangaba", "Pindorama", "Pinhalzinho",
+    "Piquerobi", "Piquete", "Piracaia", "Piracicaba", "Piraju", "Pirajuí", "Pirangi", "Pirapora do Bom Jesus", "Pirapozinho",
+    "Pirassununga", "Piratininga", "Pitangueiras", "Planalto", "Platina", "Poá", "Poloni", "Pompéia", "Pongaí", "Pontal",
+    "Pontalinda", "Pontes Gestal", "Populina", "Porangaba", "Porto Feliz", "Porto Ferreira", "Potim", "Potirendaba", "Pracinha",
+    "Pradópolis", "Praia Grande", "Pratânia", "Presidente Alves", "Presidente Bernardes", "Presidente Epitácio", "Presidente Prudente",
+    "Presidente Venceslau", "Promissão", "Quadra", "Quatá", "Queiroz", "Queluz", "Quintana", "Rafard", "Rancharia", "Redenção da Serra",
+    "Regente Feijó", "Reginópolis", "Registro", "Restinga", "Ribeira", "Ribeirão Bonito", "Ribeirão Branco", "Ribeirão Corrente",
+    "Ribeirão do Sul", "Ribeirão dos Índios", "Ribeirão Grande", "Ribeirão Pires", "Ribeirão Preto", "Rifaina", "Rincão", "Rinópolis",
+    "Rio Claro", "Rio das Pedras", "Rio Grande da Serra", "Riolândia", "Riversul", "Rosana", "Roseira", "Rubiácea", "Rubinéia",
+    "Sabino", "Sagres", "Sales", "Sales Oliveira", "Salesópolis", "Salmourão", "Saltinho", "Salto", "Salto de Pirapora",
+    "Salto Grande", "Sandovalina", "Santa Adélia", "Santa Albertina", "Santa Bárbara d'Oeste", "Santa Branca", "Santa Clara d'Oeste",
+    "Santa Cruz da Conceição", "Santa Cruz da Esperança", "Santa Cruz das Palmeiras", "Santa Cruz do Rio Pardo", "Santa Ernestina",
+    "Santa Fé do Sul", "Santa Gertrudes", "Santa Isabel", "Santa Lúcia", "Santa Maria da Serra", "Santa Mercedes", "Santa Rita d'Oeste",
+    "Santa Rita do Passa Quatro", "Santa Rosa de Viterbo", "Santa Salete", "Santana da Ponte Pensa", "Santana de Parnaíba",
+    "Santo Anastácio", "Santo André", "Santo Antônio da Alegria", "Santo Antônio de Posse", "Santo Antônio do Aracanguá", "Santo Antônio do Jardim",
+    "Santo Antônio do Pinhal", "Santo Expedito", "Santópolis do Aguapeí", "Santos", "São Bento do Sapucaí", "São Bernardo do Campo",
+    "São Caetano do Sul", "São Carlos", "São Francisco", "São João da Boa Vista", "São João das Duas Pontes", "São João de Iracema",
+    "São João do Pau d'Alho", "São Joaquim da Barra", "São José da Bela Vista", "São José do Barreiro", "São José do Rio Pardo",
+    "São José do Rio Preto", "São José dos Campos", "São Lourenço da Serra", "São Luiz do Paraitinga", "São Manuel", "São Miguel Arcanjo",
+    "São Paulo", "São Pedro", "São Pedro do Turvo", "São Roque", "São Sebastião", "São Sebastião da Grama", "São Simão", "São Vicente",
+    "Sarapuí", "Sarutaiá", "Sebastianópolis do Sul", "Serra Azul", "Serra Negra", "Serrana", "Sertãozinho", "Sete Barras",
+    "Severínia", "Silveiras", "Socorro", "Sorocaba", "Sud Mennucci", "Sumaré", "Suzanápolis", "Suzano", "Tabapuã", "Tabatinga",
+    "Taboão da Serra", "Taciba", "Taguaí", "Taiaçu", "Taiúva", "Tambaú", "Tanabi", "Tapiraí", "Tapiratiba", "Taquaral", "Taquaritinga",
+    "Taquarituba", "Taquarivaí", "Tarabai", "Tarumã", "Tatuí", "Taubaté", "Tejupá", "Teodoro Sampaio", "Terra Roxa", "Tietê",
+    "Timburi", "Torre de Pedra", "Torrinha", "Trabiju", "Tremembé", "Três Fronteiras", "Tuiuti", "Tupã", "Tupi Paulista",
+    "Turiúba", "Turmalina", "Ubarana", "Ubatuba", "Ubirajara", "Uchoa", "União Paulista", "Urânia", "Uru", "Urupês", "Valentim Gentil",
+    "Valinhos", "Valparaíso", "Vargem", "Vargem Grande do Sul", "Vargem Grande Paulista", "Várzea Paulista", "Vera Cruz", "Vinhedo",
+    "Viradouro", "Vista Alegre do Alto", "Vitória Brasil", "Votorantim", "Votuporanga", "Zacarias"])
 
             buscar_reserva = st.form_submit_button(label='Buscar Reserva')
 
@@ -964,9 +1159,6 @@ def home_page():
     else:
         menu_autenticacao = st.sidebar.radio('Selecione uma opção', ['Login', 'Cadastro', 'Recuperar Senha'])
 
-
-
-                
         if menu_autenticacao == 'Login':
             login()
         elif menu_autenticacao == 'Cadastro':
@@ -980,11 +1172,9 @@ def home_page():
 
 
 # Exibe a página inicial ou outras páginas
-# Detectar se o token está presente nos parâmetros da URL
-# Exibe a página inicial ou outras páginas
-query_params = st.experimental_get_query_params()
+params = st.experimental_get_query_params()
 
-if 'token' in query_params:
+if 'token' in params:
     resetar_senha()
 else:
     if st.session_state.get('pagina') == 'home':
@@ -994,6 +1184,7 @@ else:
         exibir_reservas_interativas()
         if st.button('Voltar'):
             st.session_state.pagina = 'home'
-            st.set_query_params(pagina='home')
+            st.query_params(pagina='home')
     else:
         home_page()
+
